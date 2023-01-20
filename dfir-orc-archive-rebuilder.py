@@ -173,7 +173,7 @@ def _extract_artefacts_recusrive(
   # Open archive
   try:
     if archive_name in archives_with_password.keys():
-      archive = SevenZipFile(archive, password=archives_with_password['archive_name'])
+      archive = SevenZipFile(archive, password=archives_with_password[archive_name])
     else:
       archive = SevenZipFile(archive)
   except Bad7zFile:
@@ -217,9 +217,10 @@ def _extract_artefacts_recusrive(
         report_destination_directory=report_destination_directory
       )
 
-      # Merge sub call results
-      ## We merge the volstat result from sub call with the ones of this call. Rewrite this call result with subcall result.
-      result['volstat'] = {**result['volstat'], **sub_call_result['volstat']}
+      if sub_call_result:
+        # Merge sub call results
+        ## We merge the volstat result from sub call with the ones of this call. Rewrite this call result with subcall result.
+        result['volstat'] = {**result['volstat'], **sub_call_result['volstat']}
 
   archive.close()
 
