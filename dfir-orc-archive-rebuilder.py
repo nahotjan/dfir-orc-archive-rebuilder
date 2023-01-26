@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 """
   _____  ______ _____ _____         ____  _____   _____                     _     _             _____      _           _ _     _           
  |  __ \|  ____|_   _|  __ \       / __ \|  __ \ / ____|     /\            | |   (_)           |  __ \    | |         (_) |   | |          
@@ -16,17 +15,20 @@ To map a volume ID with the drive letter, the script looks for volstats.csv file
 
 epilog_doc="""
 Known limitations:
-  - Parsers which rely on filestat may give wrong output and macb reflects the script running time. (explore os.utime or atomicredteam)
+  - The file creation date reflect the script usage, as non-native python solution exists.
+  - Timestomp alerts can trigger on the given files as no miliseconds/nonaseconds are used.
   - This tool fails to extract artefacts if the targeted filepath is bigger than the OS lenght limitation.
 """
 
 import io
+import os
 import csv
 import codecs
 import typing
 import tomllib
 import logging
 import pathlib
+import datetime
 
 from py7zr import SevenZipFile, Bad7zFile
 
@@ -77,7 +79,11 @@ def _parse_getthis(
   getthis = csv.DictReader(codecs.getreader('utf-8-sig')(getthis_content))
 
   for row in getthis:
-    result[row['SampleName'].replace('\\', '/')] = destination_folder.joinpath(_naming_convention_volume_folder(row['VolumeID'], row['SnapshotID']), row['FullName'].replace('\\', '/')[1:])
+    result[row['SampleName'].replace('\\', '/')] = {
+      'path': destination_folder.joinpath(_naming_convention_volume_folder(row['VolumeID'], row['SnapshotID']), row['FullName'].replace('\\', '/')[1:]),
+      'mtime': int(datetime.datetime.strptime(row['LastModificationDate'], '%Y-%m-%d %H:%M:%S.%f').timestamp()),
+      'atime': int(datetime.datetime.strptime(row['LastAccessDate'], '%Y-%m-%d %H:%M:%S.%f').timestamp())
+    }
 
   return result
 
@@ -108,13 +114,18 @@ def _parse_volstats(
 
 def _write_file(
   file_path: pathlib.Path,
-  content: io.BytesIO
+  content: io.BytesIO,
+  atime: int = None,
+  mtime: int = None
 ) -> bool:
   """
   This function write the given file content in the given file path. It creates the diretory tree if non existing. Fails if the file already exists or due any other IO errors.
 
   Args:
-    getthis_content: The GetThis.csv file content.
+    file_path: The target file path
+    content: The content of the file to write
+    atime: The access time to set for the created file
+    mtime: The modified time to set for the created file
 
   Returns:
     A boolean indicating if the file has been written.
@@ -131,12 +142,17 @@ def _write_file(
     file_path.parent.mkdir(parents=True, exist_ok=True)
 
     with open(file_path, 'wb') as file_d:
+      # Write the file
       file_d.write(content.getbuffer())
-  
+
   except (OSError, Exception) as err:
     logging.warning('Can\'t write file %s\n%s', file_path, err)
     return False
-  
+
+  # Update its m.a times if not None
+  if atime and mtime:
+    os.utime(file_path, times=(atime, mtime))
+
   return True
 
 def _extract_artefacts_recusrive( 
@@ -197,7 +213,7 @@ def _extract_artefacts_recusrive(
 
     # Write the Artefact if in GetThis.csv and log if something went wrong
     if filename in getthis_mapping.keys():
-      if not _write_file(getthis_mapping[filename], file_content):
+      if not _write_file(getthis_mapping[filename]['path'], file_content, mtime=getthis_mapping[filename]['mtime'], atime=getthis_mapping[filename]['atime']):
         log_file_with_artefacts_non_extracted.write(f'{archive_name},{filename},{getthis_mapping[filename]}\n')
 
     # Write the report file and log if something went wrong
